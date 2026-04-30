@@ -9,6 +9,7 @@ mod commands;
 mod helpers;
 mod input;
 mod llm_client;
+mod media_transcription;
 mod managers;
 mod overlay;
 pub mod portable;
@@ -425,6 +426,7 @@ pub fn run(cli_args: CliArgs) {
             commands::history::retry_history_entry_transcription,
             commands::history::update_history_limit,
             commands::history::update_recording_retention_period,
+            commands::media_transcription::transcribe_media_source,
             helpers::clamshell::is_laptop,
         ])
         .events(collect_events![managers::history::HistoryUpdatePayload,]);

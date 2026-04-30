@@ -378,6 +378,12 @@ impl HistoryManager {
     }
 
     fn cleanup_by_count(&self, limit: usize) -> Result<()> {
+        // 0 means "do not cap by count" — otherwise `entries[0..]` deletes every unsaved row
+        // right after each insert (e.g. media transcription + empty history + limit 0).
+        if limit == 0 {
+            return Ok(());
+        }
+
         let conn = self.get_connection()?;
 
         // Get all entries that are not saved, ordered by timestamp desc

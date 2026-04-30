@@ -69,6 +69,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 tar = "0.4.44"
 flate2 = "1.0"
 sha2 = "0.10"
+tempfile = "3"
 transcribe-rs = { version = "0.3.8", features = ["whisper-cpp", "onnx"] }
 handy-keys = "0.2.4"
 ferrous-opencc = "0.2.3"
@@ -99,7 +100,9 @@ windows = { version = "0.61.3", features = [
 winreg = "0.55"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
+# Pinned rev: branch tip moved and old lockfile SHAs can disappear from the remote,
+# which breaks `cargo fetch`; see https://github.com/ahkohd/tauri-nspanel/commits/v2.1
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", rev = "a3122e894383aa068ec5365a42994e3ac94ba1b6" }
 transcribe-rs = { version = "0.3.3", features = ["whisper-metal"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

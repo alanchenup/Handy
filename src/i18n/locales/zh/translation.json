@@ -15,7 +15,8 @@
     "postProcessing": "后处理",
     "history": "历史记录",
     "debug": "调试",
-    "about": "关于"
+    "about": "关于",
+    "mediaTranscribe": "转录媒体"
   },
   "onboarding": {
     "subtitle": "请选择一个转录模型以开始使用",
@@ -608,5 +609,25 @@
   "overlay": {
     "transcribing": "正在转录...",
     "processing": "处理中..."
+  },
+  "mediaTranscribe": {
+    "title": "转录媒体",
+    "subtitle": "拖放文件或粘贴链接，从媒体中提取音频并转写。可选 VAD 与实时录音一致。网页链接通常需要系统已安装 yt-dlp 与 ffmpeg。",
+    "dropHint": "在此处拖放音频或视频",
+    "dropSubhint": "支持本地媒体文件与网页链接（已安装 yt-dlp 时由其解析，否则为 ffmpeg 可直接读取的直链）。",
+    "selectFile": "选择文件",
+    "or": "或",
+    "urlPlaceholder": "粘贴视频或音频链接",
+    "transcribe": "转录",
+    "loading": "正在转录…",
+    "applyVad": "使用 VAD 过滤静音（推荐）",
+    "selectedFile": "已选文件",
+    "resultHeading": "转写结果",
+    "done": "转录完成",
+    "fileFilterName": "音频 / 视频",
+    "errors": {
+      "noInput": "请选择文件或输入链接。",
+      "failed": "转录失败。"
+    }
   }
 }

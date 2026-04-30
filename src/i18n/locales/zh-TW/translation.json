@@ -15,7 +15,8 @@
     "postProcessing": "後處理",
     "history": "歷史紀錄",
     "debug": "偵錯",
-    "about": "關於"
+    "about": "關於",
+    "mediaTranscribe": "轉錄媒體"
   },
   "onboarding": {
     "subtitle": "首先，請選擇一種模型",
@@ -608,5 +609,25 @@
   "overlay": {
     "transcribing": "正在轉錄...",
     "processing": "處理中..."
+  },
+  "mediaTranscribe": {
+    "title": "轉錄媒體",
+    "subtitle": "拖放檔案或貼上連結，從媒體擷取音訊並轉寫。可選 VAD 與即時錄音相同。多數網頁連結需已安裝 yt-dlp 與 ffmpeg。",
+    "dropHint": "在此處拖放音訊或影片",
+    "dropSubhint": "支援本機媒體檔案與網頁連結（已安裝 yt-dlp 時由其解析，否則為 ffmpeg 可直接讀取的直連）。",
+    "selectFile": "選擇檔案",
+    "or": "或",
+    "urlPlaceholder": "貼上影片或音訊連結",
+    "transcribe": "轉錄",
+    "loading": "正在轉錄…",
+    "applyVad": "使用 VAD 過濾靜音（建議）",
+    "selectedFile": "已選檔案",
+    "resultHeading": "轉寫結果",
+    "done": "轉錄完成",
+    "fileFilterName": "音訊 / 影片",
+    "errors": {
+      "noInput": "請選擇檔案或輸入連結。",
+      "failed": "轉錄失敗。"
+    }
   }
 }

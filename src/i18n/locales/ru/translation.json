@@ -15,7 +15,8 @@
     "postProcessing": "Постобработка",
     "history": "История",
     "debug": "Отладка",
-    "about": "О программе"
+    "about": "О программе",
+    "mediaTranscribe": "Транскрибировать медиа"
   },
   "onboarding": {
     "subtitle": "Для начала выберите модель транскрипции",
@@ -608,5 +609,25 @@
   "overlay": {
     "transcribing": "Расшифровка...",
     "processing": "Обработка..."
+  },
+  "mediaTranscribe": {
+    "title": "Transcribe media",
+    "subtitle": "Drag and drop a file or paste a link to transcribe extracted audio. Optional VAD matches live recording. For many web URLs, install yt-dlp and ffmpeg on your system.",
+    "dropHint": "Drag and drop audio or video here",
+    "dropSubhint": "Supports local media files and web links (yt-dlp when installed, otherwise direct URLs ffmpeg can read).",
+    "selectFile": "Select file",
+    "or": "or",
+    "urlPlaceholder": "Paste video or audio link",
+    "transcribe": "Transcribe",
+    "loading": "Transcribing…",
+    "applyVad": "Filter silence with VAD (recommended)",
+    "selectedFile": "Selected file",
+    "resultHeading": "Transcript",
+    "done": "Transcription finished",
+    "fileFilterName": "Audio / video",
+    "errors": {
+      "noInput": "Choose a file or enter a URL.",
+      "failed": "Transcription failed."
+    }
   }
 }
