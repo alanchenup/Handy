@@ -66,26 +66,32 @@ pub async fn transcribe_media_source(
     let wav_path_verify = wav_path.clone();
     let sample_count = samples_for_wav.len();
 
-    let wav_ok = tauri::async_runtime::spawn_blocking(move || {
+    let wav_save_result = tauri::async_runtime::spawn_blocking(move || {
         save_wav_file(&wav_path, &samples_for_wav).map_err(|e| e.to_string())?;
         crate::audio_toolkit::verify_wav_file(&wav_path_verify, sample_count)
             .map_err(|e| e.to_string())?;
         Ok::<(), String>(())
     })
     .await
-    .map_err(|e| format!("WAV save task panicked: {}", e))?
-    .is_ok();
+    .map_err(|e| format!("WAV save task panicked: {}", e))?;
 
-    if wav_ok {
-        if let Err(err) = history_manager.save_entry(
-            file_name,
-            transcription.clone(),
-            post_process,
-            processed.post_processed_text.clone(),
-            processed.post_process_prompt.clone(),
-        ) {
-            log::error!("Failed to save media transcription history: {}", err);
-        }
+    if let Err(ref e) = wav_save_result {
+        log::error!(
+            "Media transcription: WAV save/verify failed ({}). History will still be saved; retry-from-history may not have audio.",
+            e
+        );
+    }
+
+    // Always persist history when transcription succeeded — previously we only saved when
+    // WAV verification passed, which left the UI showing text but an empty history list.
+    if let Err(err) = history_manager.save_entry(
+        file_name,
+        transcription.clone(),
+        post_process,
+        processed.post_processed_text.clone(),
+        processed.post_process_prompt.clone(),
+    ) {
+        log::error!("Failed to save media transcription history: {}", err);
     }
 
     Ok(MediaTranscriptionResult {
