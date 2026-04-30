@@ -3,14 +3,13 @@
 //! samples to the existing transcription engine.
 
 use crate::audio_toolkit::constants;
-use crate::audio_toolkit::read_wav_samples;
+use crate::audio_toolkit::read_wav_bytes;
 use crate::audio_toolkit::vad::{SileroVad, SmoothedVad, VoiceActivityDetector};
 use anyhow::{Context, Result};
 use log::{debug, info, warn};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 use tauri::{AppHandle, Manager};
 
 const SILERO_FRAME_SAMPLES: usize = (constants::WHISPER_SAMPLE_RATE * 30 / 1000) as usize; // 30 ms @ 16 kHz
@@ -166,42 +165,19 @@ fn ytdlp_pipe_to_wav_bytes(url: &str) -> Result<Vec<u8>> {
 
 fn wav_bytes_to_f32(wav_bytes: &[u8]) -> Result<Vec<f32>> {
     let t_total = Instant::now();
-    // Do not read the WAV while `NamedTempFile` still holds the file open — on some platforms
-    // `hound` opening the same path can block or fail. Write to a closed temp file instead.
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!("handy-ffmpeg-{nanos}.wav"));
     info!(
         target: "handy::media_transcribe",
-        "wav temp write path={} bytes={}",
-        path.display(),
+        "wav parse from memory bytes={}",
         wav_bytes.len()
     );
-    fs::write(&path, wav_bytes).with_context(|| format!("write temp wav {}", path.display()))?;
-    let write_ms = t_total.elapsed().as_millis();
-
-    let t_read = Instant::now();
-    let samples =
-        read_wav_samples(&path).with_context(|| format!("parse ffmpeg WAV {}", path.display()))?;
-    let read_ms = t_read.elapsed().as_millis();
-
-    if let Err(e) = fs::remove_file(&path) {
-        debug!(
-            target: "handy::media_transcribe",
-            "remove temp wav {}: {}",
-            path.display(),
-            e
-        );
-    }
-
+    let t_parse = Instant::now();
+    let samples = read_wav_bytes(wav_bytes).context("parse ffmpeg WAV bytes")?;
+    let parse_ms = t_parse.elapsed().as_millis();
     info!(
         target: "handy::media_transcribe",
-        "parsed ffmpeg wav samples={} wav_fs_write_ms={} wav_read_ms={} wav_total_ms={}",
+        "parsed ffmpeg wav samples={} wav_read_bytes_ms={} wav_total_ms={}",
         samples.len(),
-        write_ms,
-        read_ms,
+        parse_ms,
         t_total.elapsed().as_millis()
     );
     Ok(samples)
