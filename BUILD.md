@@ -14,8 +14,9 @@ This guide covers how to set up the development environment and build Handy from
 
 #### macOS
 
-- Xcode Command Line Tools
+- Xcode Command Line Tools (full Xcode is fine too)
 - Install with: `xcode-select --install`
+- **CMake 3.20+** on your `PATH` when building (whisper.cpp / ggml need a recent CMake). Apple Silicon: `brew install cmake` and ensure `$(brew --prefix)/bin` comes **before** any old Homebrew prefix (for example `/usr/local/Cellar/cmake/...`) so `which cmake` is not a 3.15-era binary.
 
 #### Windows
 
@@ -101,6 +102,31 @@ sudo cp src-tauri/target/release/handy /usr/bin/
 Resources only need re-copying if they change upstream (new icons, sounds, etc.).
 
 ## Troubleshooting
+
+### macOS: `whisper-rs-sys` fails with `unsupported argument 'native' to option '-mcpu='`
+
+Apple Clang does not accept `-mcpu=native` the way GCC does on Linux. ggml may still add that flag when “native” CPU tuning is enabled.
+
+1. **Use a current CMake** (see macOS prerequisites) and clear the whisper build cache, then rebuild:
+
+   ```bash
+   rm -rf src-tauri/target/debug/build/whisper-rs-sys-*
+   bun run tauri dev
+   ```
+
+2. If it still fails, force ggml’s native tuning off for that Cargo invocation (ggml treats a set `SOURCE_DATE_EPOCH` like a reproducible / non-native default in many versions):
+
+   ```bash
+   export SOURCE_DATE_EPOCH=1
+   bun run tauri dev
+   ```
+
+3. As a last resort, pin generic ARM flags (only if the above is not enough):
+
+   ```bash
+   export CMAKE_ARGS="-DGGML_NATIVE=OFF -DCMAKE_C_FLAGS=-march=armv8.5-a -DCMAKE_CXX_FLAGS=-march=armv8.5-a"
+   bun run tauri dev
+   ```
 
 ### AppImage build fails on Arch / rolling-release distros
 
