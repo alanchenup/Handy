@@ -15,7 +15,8 @@
     "postProcessing": "후처리",
     "history": "히스토리",
     "debug": "디버그",
-    "about": "정보"
+    "about": "정보",
+    "mediaTranscribe": "미디어 받아쓰기"
   },
   "onboarding": {
     "subtitle": "시작하려면 음성 인식 모델을 선택하세요",
@@ -608,5 +609,25 @@
   "overlay": {
     "transcribing": "텍스트로 변환 중...",
     "processing": "처리 중..."
+  },
+  "mediaTranscribe": {
+    "title": "Transcribe media",
+    "subtitle": "Drag and drop a file or paste a link to transcribe extracted audio. Optional VAD matches live recording. For many web URLs, install yt-dlp and ffmpeg on your system.",
+    "dropHint": "Drag and drop audio or video here",
+    "dropSubhint": "Supports local media files and web links (yt-dlp when installed, otherwise direct URLs ffmpeg can read).",
+    "selectFile": "Select file",
+    "or": "or",
+    "urlPlaceholder": "Paste video or audio link",
+    "transcribe": "Transcribe",
+    "loading": "Transcribing…",
+    "applyVad": "Filter silence with VAD (recommended)",
+    "selectedFile": "Selected file",
+    "resultHeading": "Transcript",
+    "done": "Transcription finished",
+    "fileFilterName": "Audio / video",
+    "errors": {
+      "noInput": "Choose a file or enter a URL.",
+      "failed": "Transcription failed."
+    }
   }
 }
