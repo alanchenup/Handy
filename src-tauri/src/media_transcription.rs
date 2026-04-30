@@ -120,14 +120,27 @@ fn ytdlp_pipe_to_wav_bytes(url: &str) -> Result<Vec<u8>> {
         .stdout
         .take()
         .context("ffmpeg: missing stdout")?;
+    let ffmpeg_stderr = ffmpeg.stderr.take();
+    let ffmpeg_stderr_thread = std::thread::spawn(move || {
+        let mut buf = String::new();
+        if let Some(mut err) = ffmpeg_stderr {
+            let _ = std::io::Read::read_to_string(&mut err, &mut buf);
+        }
+        buf
+    });
+
     let mut buf = Vec::new();
     std::io::Read::read_to_end(&mut ffmpeg_out, &mut buf).context("read ffmpeg output")?;
 
     let ffmpeg_status = ffmpeg.wait().context("ffmpeg wait")?;
+    let ffmpeg_stderr_msg = ffmpeg_stderr_thread.join().unwrap_or_default();
     let ytdlp_status = ytdlp.wait().context("yt-dlp wait")?;
 
     if !ffmpeg_status.success() {
-        anyhow::bail!("ffmpeg failed while reading yt-dlp stream");
+        anyhow::bail!(
+            "ffmpeg failed while reading yt-dlp stream: {}",
+            ffmpeg_stderr_msg.trim()
+        );
     }
     if !ytdlp_status.success() {
         anyhow::bail!("yt-dlp failed (check the URL and that the site is supported)");
