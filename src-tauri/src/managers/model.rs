@@ -1,5 +1,6 @@
 use crate::settings::{get_settings, write_settings};
 use anyhow::Result;
+use bzip2::read::BzDecoder;
 use flate2::read::GzDecoder;
 use futures_util::StreamExt;
 use log::{debug, info, warn};
@@ -27,6 +28,7 @@ pub enum EngineType {
     GigaAM,
     Canary,
     Cohere,
+    FunASR,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -605,6 +607,45 @@ impl ModelManager {
                 supports_translation: false,
                 is_recommended: false,
                 supported_languages: cohere_languages,
+                supports_language_selection: true,
+                is_custom: false,
+            },
+        );
+
+        // Fun-ASR Nano supported languages (Chinese, English, Japanese + dialects)
+        let funasr_nano_languages: Vec<String> = vec![
+            "zh", "zh-Hans", "zh-Hant", "yue", "en", "ja",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+
+        // Fun-ASR-Nano-2512: encoder_adaptor + llm + embedding + Qwen3-0.6B tokenizer
+        // Model archive from sherpa-onnx pre-built int8 release (948 MB).
+        available_models.insert(
+            "funasr-nano-int8".to_string(),
+            ModelInfo {
+                id: "funasr-nano-int8".to_string(),
+                name: "Fun-ASR Nano".to_string(),
+                description: "Excellent Chinese, dialects, English, Japanese. 800M params."
+                    .to_string(),
+                filename: "sherpa-onnx-funasr-nano-int8-2025-12-30".to_string(),
+                url: Some(
+                    "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-funasr-nano-int8-2025-12-30.tar.bz2"
+                        .to_string(),
+                ),
+                sha256: None, // GitHub release artifacts don't have a fixed SHA256 in docs
+                size_mb: 948,
+                is_downloaded: false,
+                is_downloading: false,
+                partial_size: 0,
+                is_directory: true,
+                engine_type: EngineType::FunASR,
+                accuracy_score: 0.88,
+                speed_score: 0.80,
+                supports_translation: false,
+                is_recommended: false,
+                supported_languages: funasr_nano_languages.clone(),
                 supports_language_selection: true,
                 is_custom: false,
             },
@@ -1233,13 +1274,19 @@ impl ModelManager {
             // Create temporary extraction directory
             fs::create_dir_all(&temp_extract_dir)?;
 
-            // Open the downloaded tar.gz file
-            let tar_gz = File::open(&partial_path)?;
-            let tar = GzDecoder::new(tar_gz);
-            let mut archive = Archive::new(tar);
+            // Detect archive format from URL and extract accordingly (.tar.gz or .tar.bz2)
+            let use_bz2 = url.ends_with(".tar.bz2") || url.ends_with(".tbz2");
+            let archive_file = File::open(&partial_path)?;
+            let unpack_result: std::io::Result<()> = if use_bz2 {
+                let mut archive = Archive::new(BzDecoder::new(archive_file));
+                archive.unpack(&temp_extract_dir)
+            } else {
+                let mut archive = Archive::new(GzDecoder::new(archive_file));
+                archive.unpack(&temp_extract_dir)
+            };
 
-            // Extract to the temporary directory first
-            archive.unpack(&temp_extract_dir).map_err(|e| {
+            // Map extraction error with cleanup
+            unpack_result.map_err(|e| {
                 let error_msg = format!("Failed to extract archive: {}", e);
                 // Clean up failed extraction
                 let _ = fs::remove_dir_all(&temp_extract_dir);

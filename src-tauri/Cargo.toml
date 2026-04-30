@@ -71,6 +71,8 @@ flate2 = "1.0"
 sha2 = "0.10"
 tempfile = "3"
 transcribe-rs = { version = "0.3.8", features = ["whisper-cpp", "onnx"] }
+sherpa-onnx = { version = "1.12.40", default-features = true }
+bzip2 = "0.5"
 handy-keys = "0.2.4"
 ferrous-opencc = "0.2.3"
 clap = { version = "4", features = ["derive"] }

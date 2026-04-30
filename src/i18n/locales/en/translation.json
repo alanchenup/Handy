@@ -113,6 +113,10 @@
       "cohere-int8": {
         "name": "Cohere",
         "description": "A large, slower, but very accurate multilingual model."
+      },
+      "funasr-nano-int8": {
+        "name": "Fun-ASR Nano",
+        "description": "Excellent Chinese (dialects & accents), English, Japanese. 800M params."
       }
     },
     "errors": {

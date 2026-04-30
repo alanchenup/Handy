@@ -93,6 +93,10 @@
       "cohere-int8": {
         "name": "Cohere",
         "description": "大型模型，速度较慢，但多语言识别非常准确。"
+      },
+      "funasr-nano-int8": {
+        "name": "Fun-ASR Nano",
+        "description": "中文（方言与口音）、英文、日文识别极佳。8亿参数，支持歌词识别。"
       }
     },
     "errors": {
