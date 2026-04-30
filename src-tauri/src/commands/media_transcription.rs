@@ -6,6 +6,7 @@ use log::{error, info, warn};
 use serde::Serialize;
 use specta::Type;
 use std::sync::Arc;
+use std::time::Instant;
 use tauri::{AppHandle, State};
 
 #[derive(Serialize, Type)]
@@ -36,6 +37,7 @@ pub async fn transcribe_media_source(
     } else {
         "file"
     };
+    let t_cmd = Instant::now();
     info!(
         target: "handy::media_transcribe",
         "transcribe_media_source start kind={} apply_vad={} post_process={}",
@@ -46,6 +48,7 @@ pub async fn transcribe_media_source(
 
     transcription_manager.initiate_model_load();
 
+    let t_extract = Instant::now();
     let samples = tauri::async_runtime::spawn_blocking(move || {
         crate::media_transcription::extract_and_prepare_for_transcription(
             &app_extract,
@@ -56,6 +59,11 @@ pub async fn transcribe_media_source(
     .await
     .map_err(|e| format!("Media extraction task panicked: {}", e))?
     .map_err(|e| e.to_string())?;
+    info!(
+        target: "handy::media_transcribe",
+        "stage extract_blocking elapsed_ms={}",
+        t_extract.elapsed().as_millis()
+    );
 
     if samples.is_empty() {
         warn!(
@@ -68,17 +76,24 @@ pub async fn transcribe_media_source(
     let duration_s = samples.len() as f64 / 16_000.0;
     info!(
         target: "handy::media_transcribe",
-        "extract done samples={} duration_sec={:.2}",
+        "extract done samples={} duration_sec={:.2} cmd_elapsed_so_far_ms={}",
         samples.len(),
-        duration_s
+        duration_s,
+        t_cmd.elapsed().as_millis()
     );
 
     let tm = Arc::clone(&transcription_manager);
     let samples_for_wav = samples.clone();
+    let t_asr = Instant::now();
     let transcription = tauri::async_runtime::spawn_blocking(move || tm.transcribe(samples))
         .await
         .map_err(|e| format!("Transcription task panicked: {}", e))?
         .map_err(|e| e.to_string())?;
+    info!(
+        target: "handy::media_transcribe",
+        "stage transcribe_blocking elapsed_ms={}",
+        t_asr.elapsed().as_millis()
+    );
 
     if transcription.is_empty() {
         warn!(
@@ -94,7 +109,13 @@ pub async fn transcribe_media_source(
         transcription.chars().count()
     );
 
+    let t_pp = Instant::now();
     let processed = process_transcription_output(&app, &transcription, post_process).await;
+    info!(
+        target: "handy::media_transcribe",
+        "stage post_process elapsed_ms={}",
+        t_pp.elapsed().as_millis()
+    );
 
     let file_name = format!("media-{}.wav", chrono::Utc::now().timestamp_millis());
     let wav_path = history_manager.recordings_dir().join(&file_name);
@@ -107,6 +128,7 @@ pub async fn transcribe_media_source(
         sample_count
     );
 
+    let t_wav = Instant::now();
     let wav_save_result = tauri::async_runtime::spawn_blocking(move || {
         save_wav_file(&wav_path, &samples_for_wav).map_err(|e| e.to_string())?;
         crate::audio_toolkit::verify_wav_file(&wav_path_verify, sample_count)
@@ -115,6 +137,11 @@ pub async fn transcribe_media_source(
     })
     .await
     .map_err(|e| format!("WAV save task panicked: {}", e))?;
+    info!(
+        target: "handy::media_transcribe",
+        "stage wav_save_verify_blocking elapsed_ms={}",
+        t_wav.elapsed().as_millis()
+    );
 
     if let Err(ref e) = wav_save_result {
         error!(
@@ -132,6 +159,7 @@ pub async fn transcribe_media_source(
 
     // Always persist history when transcription succeeded — previously we only saved when
     // WAV verification passed, which left the UI showing text but an empty history list.
+    let t_hist = Instant::now();
     match history_manager.save_entry(
         file_name.clone(),
         transcription.clone(),
@@ -142,15 +170,17 @@ pub async fn transcribe_media_source(
         Ok(entry) => {
             info!(
                 target: "handy::media_transcribe",
-                "history saved id={} file_name={}",
+                "history saved id={} file_name={} save_entry_elapsed_ms={}",
                 entry.id,
-                entry.file_name
+                entry.file_name,
+                t_hist.elapsed().as_millis()
             );
         }
         Err(err) => {
             error!(
                 target: "handy::media_transcribe",
-                "history save_entry failed: {}",
+                "history save_entry failed after_ms={}: {}",
+                t_hist.elapsed().as_millis(),
                 err
             );
         }
@@ -158,8 +188,9 @@ pub async fn transcribe_media_source(
 
     info!(
         target: "handy::media_transcribe",
-        "transcribe_media_source done final_text_chars={}",
-        processed.final_text.chars().count()
+        "transcribe_media_source done final_text_chars={} total_elapsed_ms={}",
+        processed.final_text.chars().count(),
+        t_cmd.elapsed().as_millis()
     );
 
     Ok(MediaTranscriptionResult {

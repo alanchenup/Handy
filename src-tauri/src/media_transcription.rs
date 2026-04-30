@@ -7,11 +7,11 @@ use crate::audio_toolkit::read_wav_samples;
 use crate::audio_toolkit::vad::{SileroVad, SmoothedVad, VoiceActivityDetector};
 use anyhow::{Context, Result};
 use log::{debug, info, warn};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
-use tempfile::NamedTempFile;
 
 const SILERO_FRAME_SAMPLES: usize = (constants::WHISPER_SAMPLE_RATE * 30 / 1000) as usize; // 30 ms @ 16 kHz
 
@@ -34,6 +34,7 @@ const FFMPEG_OUTPUT_ARGS: &[&str] = &[
 
 /// Run ffmpeg to decode `input` (file path or URL) to mono 16 kHz WAV bytes.
 fn ffmpeg_to_wav_bytes(input: &str) -> Result<Vec<u8>> {
+    let t0 = Instant::now();
     info!(
         target: "handy::media_transcribe",
         "ffmpeg decode start input_len={}",
@@ -77,14 +78,16 @@ fn ffmpeg_to_wav_bytes(input: &str) -> Result<Vec<u8>> {
 
     info!(
         target: "handy::media_transcribe",
-        "ffmpeg decode ok bytes={}",
-        out.len()
+        "ffmpeg decode ok bytes={} elapsed_ms={}",
+        out.len(),
+        t0.elapsed().as_millis()
     );
     Ok(out)
 }
 
 /// Stream best audio from URL via yt-dlp into ffmpeg (when yt-dlp is available).
 fn ytdlp_pipe_to_wav_bytes(url: &str) -> Result<Vec<u8>> {
+    let t0 = Instant::now();
     info!(
         target: "handy::media_transcribe",
         "yt-dlp pipe decode start url_len={}",
@@ -154,24 +157,53 @@ fn ytdlp_pipe_to_wav_bytes(url: &str) -> Result<Vec<u8>> {
 
     info!(
         target: "handy::media_transcribe",
-        "yt-dlp pipe decode ok bytes={}",
-        buf.len()
+        "yt-dlp pipe decode ok bytes={} elapsed_ms={}",
+        buf.len(),
+        t0.elapsed().as_millis()
     );
     Ok(buf)
 }
 
 fn wav_bytes_to_f32(wav_bytes: &[u8]) -> Result<Vec<f32>> {
-    let mut tmp = NamedTempFile::new().context("temp file for wav")?;
-    tmp.write_all(wav_bytes)?;
-    tmp.flush()?;
-    let path: PathBuf = tmp.path().to_path_buf();
-    let samples = read_wav_samples(&path).context("parse ffmpeg WAV output")?;
+    let t_total = Instant::now();
+    // Do not read the WAV while `NamedTempFile` still holds the file open — on some platforms
+    // `hound` opening the same path can block or fail. Write to a closed temp file instead.
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("handy-ffmpeg-{nanos}.wav"));
     info!(
         target: "handy::media_transcribe",
-        "parsed ffmpeg wav samples={}",
-        samples.len()
+        "wav temp write path={} bytes={}",
+        path.display(),
+        wav_bytes.len()
     );
-    drop(tmp);
+    fs::write(&path, wav_bytes).with_context(|| format!("write temp wav {}", path.display()))?;
+    let write_ms = t_total.elapsed().as_millis();
+
+    let t_read = Instant::now();
+    let samples =
+        read_wav_samples(&path).with_context(|| format!("parse ffmpeg WAV {}", path.display()))?;
+    let read_ms = t_read.elapsed().as_millis();
+
+    if let Err(e) = fs::remove_file(&path) {
+        debug!(
+            target: "handy::media_transcribe",
+            "remove temp wav {}: {}",
+            path.display(),
+            e
+        );
+    }
+
+    info!(
+        target: "handy::media_transcribe",
+        "parsed ffmpeg wav samples={} wav_fs_write_ms={} wav_read_ms={} wav_total_ms={}",
+        samples.len(),
+        write_ms,
+        read_ms,
+        t_total.elapsed().as_millis()
+    );
     Ok(samples)
 }
 
@@ -186,6 +218,7 @@ fn resolve_vad_model_path(app: &AppHandle) -> Result<PathBuf> {
 
 /// Apply Silero + smoothed VAD identical to live recording (30 ms frames @ 16 kHz).
 pub fn apply_file_vad(app: &AppHandle, samples: &[f32]) -> Result<Vec<f32>> {
+    let t0 = Instant::now();
     let vad_path = resolve_vad_model_path(app)?;
     let silero = SileroVad::new(&vad_path, 0.3).context("SileroVad::new")?;
     let mut smoothed = SmoothedVad::new(Box::new(silero), 15, 15, 2);
@@ -210,15 +243,17 @@ pub fn apply_file_vad(app: &AppHandle, samples: &[f32]) -> Result<Vec<f32>> {
     }
     info!(
         target: "handy::media_transcribe",
-        "file VAD in_samples={} out_samples={}",
+        "file VAD in_samples={} out_samples={} elapsed_ms={}",
         in_len,
-        out.len()
+        out.len(),
+        t0.elapsed().as_millis()
     );
     Ok(out)
 }
 
 /// Extract mono 16 kHz f32 PCM from a local media file path.
 pub fn extract_audio_from_file(path: &Path) -> Result<Vec<f32>> {
+    let t0 = Instant::now();
     info!(
         target: "handy::media_transcribe",
         "extract from file path={}",
@@ -228,11 +263,18 @@ pub fn extract_audio_from_file(path: &Path) -> Result<Vec<f32>> {
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("Invalid file path (non-UTF8)"))?;
     let wav = ffmpeg_to_wav_bytes(path_str)?;
-    wav_bytes_to_f32(&wav)
+    let out = wav_bytes_to_f32(&wav)?;
+    info!(
+        target: "handy::media_transcribe",
+        "extract_audio_from_file done elapsed_ms={}",
+        t0.elapsed().as_millis()
+    );
+    Ok(out)
 }
 
 /// Extract audio from a remote URL: try yt-dlp first, then plain ffmpeg.
 pub fn extract_audio_from_url(url: &str) -> Result<Vec<f32>> {
+    let t0 = Instant::now();
     info!(
         target: "handy::media_transcribe",
         "extract from url len={}",
@@ -249,7 +291,13 @@ pub fn extract_audio_from_url(url: &str) -> Result<Vec<f32>> {
             ffmpeg_to_wav_bytes(url.trim())?
         }
     };
-    wav_bytes_to_f32(&wav)
+    let out = wav_bytes_to_f32(&wav)?;
+    info!(
+        target: "handy::media_transcribe",
+        "extract_audio_from_url done elapsed_ms={}",
+        t0.elapsed().as_millis()
+    );
+    Ok(out)
 }
 
 pub fn extract_audio_from_source(_app: &AppHandle, source: &str) -> Result<Vec<f32>> {
@@ -265,6 +313,7 @@ pub fn extract_and_prepare_for_transcription(
     source: &str,
     apply_vad: bool,
 ) -> Result<Vec<f32>> {
+    let t0 = Instant::now();
     info!(
         target: "handy::media_transcribe",
         "extract_and_prepare apply_vad={}",
@@ -279,8 +328,9 @@ pub fn extract_and_prepare_for_transcription(
     }
     info!(
         target: "handy::media_transcribe",
-        "extract_and_prepare done samples={}",
-        samples.len()
+        "extract_and_prepare done samples={} total_elapsed_ms={}",
+        samples.len(),
+        t0.elapsed().as_millis()
     );
     Ok(samples)
 }
