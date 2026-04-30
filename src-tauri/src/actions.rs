@@ -571,6 +571,10 @@ impl ShortcutAction for TranscribeAction {
                         }
                     };
 
+                    if !wav_saved {
+                        error!("WAV save/verify failed; history will still be saved without audio");
+                    }
+
                     match transcription_result {
                         Ok(transcription) => {
                             debug!(
@@ -586,17 +590,16 @@ impl ShortcutAction for TranscribeAction {
                                 process_transcription_output(&ah, &transcription, post_process)
                                     .await;
 
-                            // Save to history if WAV was saved
-                            if wav_saved {
-                                if let Err(err) = hm.save_entry(
-                                    file_name,
-                                    transcription,
-                                    post_process,
-                                    processed.post_processed_text.clone(),
-                                    processed.post_process_prompt.clone(),
-                                ) {
-                                    error!("Failed to save history entry: {}", err);
-                                }
+                            // Always save to history when transcription succeeded — WAV failure
+                            // should not silently drop the history entry.
+                            if let Err(err) = hm.save_entry(
+                                file_name,
+                                transcription,
+                                post_process,
+                                processed.post_processed_text.clone(),
+                                processed.post_process_prompt.clone(),
+                            ) {
+                                error!("Failed to save history entry: {}", err);
                             }
 
                             if processed.final_text.is_empty() {
@@ -629,17 +632,16 @@ impl ShortcutAction for TranscribeAction {
                         }
                         Err(err) => {
                             debug!("Global Shortcut Transcription error: {}", err);
-                            // Save entry with empty text so user can retry
-                            if wav_saved {
-                                if let Err(save_err) = hm.save_entry(
-                                    file_name,
-                                    String::new(),
-                                    post_process,
-                                    None,
-                                    None,
-                                ) {
-                                    error!("Failed to save failed history entry: {}", save_err);
-                                }
+                            // Always save entry with empty text so user can see the failed attempt
+                            // and retry from history, regardless of WAV save result.
+                            if let Err(save_err) = hm.save_entry(
+                                file_name,
+                                String::new(),
+                                post_process,
+                                None,
+                                None,
+                            ) {
+                                error!("Failed to save failed history entry: {}", save_err);
                             }
                             utils::hide_recording_overlay(&ah);
                             change_tray_icon(&ah, TrayIconState::Idle);
