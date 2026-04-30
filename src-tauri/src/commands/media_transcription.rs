@@ -2,6 +2,7 @@ use crate::actions::process_transcription_output;
 use crate::audio_toolkit::save_wav_file;
 use crate::managers::history::HistoryManager;
 use crate::managers::transcription::TranscriptionManager;
+use log::{error, info, warn};
 use serde::Serialize;
 use specta::Type;
 use std::sync::Arc;
@@ -30,6 +31,19 @@ pub async fn transcribe_media_source(
         return Err("No file or URL provided".to_string());
     }
 
+    let source_kind = if source_trim.starts_with("http://") || source_trim.starts_with("https://") {
+        "url"
+    } else {
+        "file"
+    };
+    info!(
+        target: "handy::media_transcribe",
+        "transcribe_media_source start kind={} apply_vad={} post_process={}",
+        source_kind,
+        apply_vad,
+        post_process
+    );
+
     transcription_manager.initiate_model_load();
 
     let samples = tauri::async_runtime::spawn_blocking(move || {
@@ -44,8 +58,20 @@ pub async fn transcribe_media_source(
     .map_err(|e| e.to_string())?;
 
     if samples.is_empty() {
+        warn!(
+            target: "handy::media_transcribe",
+            "transcribe_media_source: no samples after extract (empty audio)"
+        );
         return Err("No audio extracted".to_string());
     }
+
+    let duration_s = samples.len() as f64 / 16_000.0;
+    info!(
+        target: "handy::media_transcribe",
+        "extract done samples={} duration_sec={:.2}",
+        samples.len(),
+        duration_s
+    );
 
     let tm = Arc::clone(&transcription_manager);
     let samples_for_wav = samples.clone();
@@ -55,16 +81,31 @@ pub async fn transcribe_media_source(
         .map_err(|e| e.to_string())?;
 
     if transcription.is_empty() {
+        warn!(
+            target: "handy::media_transcribe",
+            "transcribe_media_source: model returned empty text"
+        );
         return Err("Transcription is empty".to_string());
     }
 
-    let processed =
-        process_transcription_output(&app, &transcription, post_process).await;
+    info!(
+        target: "handy::media_transcribe",
+        "transcription chars={}",
+        transcription.chars().count()
+    );
+
+    let processed = process_transcription_output(&app, &transcription, post_process).await;
 
     let file_name = format!("media-{}.wav", chrono::Utc::now().timestamp_millis());
     let wav_path = history_manager.recordings_dir().join(&file_name);
     let wav_path_verify = wav_path.clone();
     let sample_count = samples_for_wav.len();
+    info!(
+        target: "handy::media_transcribe",
+        "saving wav path={} samples={}",
+        wav_path.display(),
+        sample_count
+    );
 
     let wav_save_result = tauri::async_runtime::spawn_blocking(move || {
         save_wav_file(&wav_path, &samples_for_wav).map_err(|e| e.to_string())?;
@@ -76,23 +117,50 @@ pub async fn transcribe_media_source(
     .map_err(|e| format!("WAV save task panicked: {}", e))?;
 
     if let Err(ref e) = wav_save_result {
-        log::error!(
-            "Media transcription: WAV save/verify failed ({}). History will still be saved; retry-from-history may not have audio.",
+        error!(
+            target: "handy::media_transcribe",
+            "WAV save/verify failed ({}); history will still be saved",
             e
+        );
+    } else {
+        info!(
+            target: "handy::media_transcribe",
+            "WAV save and verify ok file_name={}",
+            file_name
         );
     }
 
     // Always persist history when transcription succeeded — previously we only saved when
     // WAV verification passed, which left the UI showing text but an empty history list.
-    if let Err(err) = history_manager.save_entry(
-        file_name,
+    match history_manager.save_entry(
+        file_name.clone(),
         transcription.clone(),
         post_process,
         processed.post_processed_text.clone(),
         processed.post_process_prompt.clone(),
     ) {
-        log::error!("Failed to save media transcription history: {}", err);
+        Ok(entry) => {
+            info!(
+                target: "handy::media_transcribe",
+                "history saved id={} file_name={}",
+                entry.id,
+                entry.file_name
+            );
+        }
+        Err(err) => {
+            error!(
+                target: "handy::media_transcribe",
+                "history save_entry failed: {}",
+                err
+            );
+        }
     }
+
+    info!(
+        target: "handy::media_transcribe",
+        "transcribe_media_source done final_text_chars={}",
+        processed.final_text.chars().count()
+    );
 
     Ok(MediaTranscriptionResult {
         text: processed.final_text,
