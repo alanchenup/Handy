@@ -3,7 +3,6 @@
 //! samples to the existing transcription engine.
 
 use crate::audio_toolkit::constants;
-use crate::audio_toolkit::read_wav_bytes;
 use crate::audio_toolkit::vad::{SileroVad, SmoothedVad, VoiceActivityDetector};
 use anyhow::{Context, Result};
 use log::{debug, info, warn};
@@ -19,6 +18,10 @@ fn is_http_url(s: &str) -> bool {
     t.starts_with("https://") || t.starts_with("http://")
 }
 
+// Use raw signed 16-bit little-endian PCM output instead of WAV.
+// WAV written to a pipe has 0xFFFFFFFF in the data-chunk-size field because
+// ffmpeg cannot seek back to fill in the real size, which causes hound to
+// report u32::MAX samples and makes try_reserve() attempt a ~16 GB allocation.
 const FFMPEG_OUTPUT_ARGS: &[&str] = &[
     "-vn",
     "-ac",
@@ -26,13 +29,13 @@ const FFMPEG_OUTPUT_ARGS: &[&str] = &[
     "-ar",
     "16000",
     "-f",
-    "wav",
+    "s16le",
     "-loglevel",
     "error",
 ];
 
-/// Run ffmpeg to decode `input` (file path or URL) to mono 16 kHz WAV bytes.
-fn ffmpeg_to_wav_bytes(input: &str) -> Result<Vec<u8>> {
+/// Run ffmpeg to decode `input` (file path or URL) to mono 16 kHz raw s16le PCM bytes.
+fn ffmpeg_to_pcm_bytes(input: &str) -> Result<Vec<u8>> {
     let t0 = Instant::now();
     info!(
         target: "handy::media_transcribe",
@@ -84,8 +87,9 @@ fn ffmpeg_to_wav_bytes(input: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// Stream best audio from URL via yt-dlp into ffmpeg (when yt-dlp is available).
-fn ytdlp_pipe_to_wav_bytes(url: &str) -> Result<Vec<u8>> {
+/// Stream best audio from URL via yt-dlp into ffmpeg (when yt-dlp is available),
+/// returning mono 16 kHz raw s16le PCM bytes.
+fn ytdlp_pipe_to_pcm_bytes(url: &str) -> Result<Vec<u8>> {
     let t0 = Instant::now();
     info!(
         target: "handy::media_transcribe",
@@ -163,24 +167,33 @@ fn ytdlp_pipe_to_wav_bytes(url: &str) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-fn wav_bytes_to_f32(wav_bytes: &[u8]) -> Result<Vec<f32>> {
-    let t_total = Instant::now();
+/// Convert raw signed 16-bit little-endian PCM bytes (ffmpeg -f s16le output) to f32 samples.
+fn s16le_bytes_to_f32(pcm_bytes: &[u8]) -> Result<Vec<f32>> {
+    let t0 = Instant::now();
     info!(
         target: "handy::media_transcribe",
-        "wav parse from memory bytes={}",
-        wav_bytes.len()
+        "pcm parse from memory bytes={}",
+        pcm_bytes.len()
     );
-    let t_parse = Instant::now();
-    let samples = read_wav_bytes(wav_bytes).context("parse ffmpeg WAV bytes")?;
-    let parse_ms = t_parse.elapsed().as_millis();
+    if pcm_bytes.len() % 2 != 0 {
+        anyhow::bail!(
+            "raw PCM byte count {} is not a multiple of 2 (s16le frames)",
+            pcm_bytes.len()
+        );
+    }
+    let sample_count = pcm_bytes.len() / 2;
+    let mut out = Vec::with_capacity(sample_count);
+    for chunk in pcm_bytes.chunks_exact(2) {
+        let v = i16::from_le_bytes([chunk[0], chunk[1]]);
+        out.push(v as f32 / i16::MAX as f32);
+    }
     info!(
         target: "handy::media_transcribe",
-        "parsed ffmpeg wav samples={} wav_read_bytes_ms={} wav_total_ms={}",
-        samples.len(),
-        parse_ms,
-        t_total.elapsed().as_millis()
+        "parsed pcm samples={} elapsed_ms={}",
+        out.len(),
+        t0.elapsed().as_millis()
     );
-    Ok(samples)
+    Ok(out)
 }
 
 fn resolve_vad_model_path(app: &AppHandle) -> Result<PathBuf> {
@@ -238,8 +251,8 @@ pub fn extract_audio_from_file(path: &Path) -> Result<Vec<f32>> {
     let path_str = path
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("Invalid file path (non-UTF8)"))?;
-    let wav = ffmpeg_to_wav_bytes(path_str)?;
-    let out = wav_bytes_to_f32(&wav)?;
+    let pcm = ffmpeg_to_pcm_bytes(path_str)?;
+    let out = s16le_bytes_to_f32(&pcm)?;
     info!(
         target: "handy::media_transcribe",
         "extract_audio_from_file done elapsed_ms={}",
@@ -256,7 +269,7 @@ pub fn extract_audio_from_url(url: &str) -> Result<Vec<f32>> {
         "extract from url len={}",
         url.len()
     );
-    let wav = match ytdlp_pipe_to_wav_bytes(url) {
+    let pcm = match ytdlp_pipe_to_pcm_bytes(url) {
         Ok(b) => b,
         Err(e_ytdlp) => {
             warn!(
@@ -264,10 +277,10 @@ pub fn extract_audio_from_url(url: &str) -> Result<Vec<f32>> {
                 "yt-dlp failed: {}; trying ffmpeg -i URL",
                 e_ytdlp
             );
-            ffmpeg_to_wav_bytes(url.trim())?
+            ffmpeg_to_pcm_bytes(url.trim())?
         }
     };
-    let out = wav_bytes_to_f32(&wav)?;
+    let out = s16le_bytes_to_f32(&pcm)?;
     info!(
         target: "handy::media_transcribe",
         "extract_audio_from_url done elapsed_ms={}",
