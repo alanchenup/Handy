@@ -67,8 +67,9 @@ pub async fn transcribe_media_source(
     let sample_count = samples_for_wav.len();
 
     let wav_ok = tauri::async_runtime::spawn_blocking(move || {
-        save_wav_file(&wav_path, &samples_for_wav)?;
-        crate::audio_toolkit::verify_wav_file(&wav_path_verify, sample_count)?;
+        save_wav_file(&wav_path, &samples_for_wav).map_err(|e| e.to_string())?;
+        crate::audio_toolkit::verify_wav_file(&wav_path_verify, sample_count)
+            .map_err(|e| e.to_string())?;
         Ok::<(), String>(())
     })
     .await

@@ -10,7 +10,7 @@ use log::{debug, warn};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tempfile::NamedTempFile;
 
 const SILERO_FRAME_SAMPLES: usize =
@@ -21,19 +21,17 @@ fn is_http_url(s: &str) -> bool {
     t.starts_with("https://") || t.starts_with("http://")
 }
 
-fn ffmpeg_output_args() -> [&'static str; 8] {
-    [
-        "-vn",
-        "-ac",
-        "1",
-        "-ar",
-        "16000",
-        "-f",
-        "wav",
-        "-loglevel",
-        "error",
-    ]
-}
+const FFMPEG_OUTPUT_ARGS: &[&str] = &[
+    "-vn",
+    "-ac",
+    "1",
+    "-ar",
+    "16000",
+    "-f",
+    "wav",
+    "-loglevel",
+    "error",
+];
 
 /// Run ffmpeg to decode `input` (file path or URL) to mono 16 kHz WAV bytes.
 fn ffmpeg_to_wav_bytes(input: &str) -> Result<Vec<u8>> {
@@ -42,7 +40,7 @@ fn ffmpeg_to_wav_bytes(input: &str) -> Result<Vec<u8>> {
         .arg("-y")
         .arg("-i")
         .arg(input)
-        .args(ffmpeg_output_args())
+        .args(FFMPEG_OUTPUT_ARGS)
         .arg("pipe:1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -108,7 +106,7 @@ fn ytdlp_pipe_to_wav_bytes(url: &str) -> Result<Vec<u8>> {
         .arg("-y")
         .arg("-i")
         .arg("pipe:0")
-        .args(ffmpeg_output_args())
+        .args(FFMPEG_OUTPUT_ARGS)
         .arg("pipe:1")
         .stdin(Stdio::from(ytdlp_stdout))
         .stdout(Stdio::piped())
@@ -215,7 +213,7 @@ pub fn extract_audio_from_url(url: &str) -> Result<Vec<f32>> {
     wav_bytes_to_f32(&wav)
 }
 
-pub fn extract_audio_from_source(app: &AppHandle, source: &str) -> Result<Vec<f32>> {
+pub fn extract_audio_from_source(_app: &AppHandle, source: &str) -> Result<Vec<f32>> {
     if is_http_url(source) {
         extract_audio_from_url(source.trim())
     } else {
