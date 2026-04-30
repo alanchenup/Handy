@@ -18,7 +18,7 @@ pub fn read_wav_samples<P: AsRef<Path>>(file_path: P) -> Result<Vec<f32>> {
 /// Read WAV bytes (e.g. ffmpeg stdout) from memory — avoids slow or blocking second open on disk.
 pub fn read_wav_bytes(wav_bytes: &[u8]) -> Result<Vec<f32>> {
     let t0 = Instant::now();
-    let reader = WavReader::new(Cursor::new(wav_bytes)).context("WavReader::new")?;
+    let mut reader = WavReader::new(Cursor::new(wav_bytes)).context("WavReader::new")?;
     let spec = reader.spec();
     let ch = spec.channels as usize;
     let total_i16_values = reader.len() as usize;
