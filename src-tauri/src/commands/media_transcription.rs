@@ -85,29 +85,41 @@ pub async fn transcribe_media_source(
     let tm = Arc::clone(&transcription_manager);
     let samples_for_wav = samples.clone();
     let t_asr = Instant::now();
-    let transcription = tauri::async_runtime::spawn_blocking(move || tm.transcribe(samples))
+    let transcription_result = tauri::async_runtime::spawn_blocking(move || tm.transcribe(samples))
         .await
         .map_err(|e| format!("Transcription task panicked: {}", e))?
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string());
     info!(
         target: "handy::media_transcribe",
         "stage transcribe_blocking elapsed_ms={}",
         t_asr.elapsed().as_millis()
     );
 
+    let transcription = match &transcription_result {
+        Ok(t) => {
+            info!(
+                target: "handy::media_transcribe",
+                "transcription chars={}",
+                t.chars().count()
+            );
+            t.clone()
+        }
+        Err(e) => {
+            warn!(
+                target: "handy::media_transcribe",
+                "transcription error: {}",
+                e
+            );
+            String::new()
+        }
+    };
+
     if transcription.is_empty() {
         warn!(
             target: "handy::media_transcribe",
             "transcribe_media_source: model returned empty text"
         );
-        return Err("Transcription is empty".to_string());
     }
-
-    info!(
-        target: "handy::media_transcribe",
-        "transcription chars={}",
-        transcription.chars().count()
-    );
 
     let t_pp = Instant::now();
     let processed = process_transcription_output(&app, &transcription, post_process).await;
@@ -157,8 +169,8 @@ pub async fn transcribe_media_source(
         );
     }
 
-    // Always persist history when transcription succeeded — previously we only saved when
-    // WAV verification passed, which left the UI showing text but an empty history list.
+    // Always persist history — even when transcription is empty or failed — so the
+    // attempt is visible in history and the user can retry or inspect the audio.
     let t_hist = Instant::now();
     match history_manager.save_entry(
         file_name.clone(),
@@ -184,6 +196,14 @@ pub async fn transcribe_media_source(
                 err
             );
         }
+    }
+
+    // Return error to the frontend only after history has been saved.
+    if let Err(e) = transcription_result {
+        return Err(e);
+    }
+    if transcription.is_empty() {
+        return Err("Transcription is empty".to_string());
     }
 
     info!(
