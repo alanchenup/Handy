@@ -763,10 +763,27 @@ impl TranscriptionManager {
 ///   <model_dir>/llm.int8.onnx
 ///   <model_dir>/embedding.int8.onnx
 ///   <model_dir>/Qwen3-0.6B/   (tokenizer directory)
+/// Resolve a model file by trying multiple quantization suffixes.
+/// Returns the first existing path, or an error listing all candidates tried.
+fn resolve_funasr_file(model_dir: &std::path::Path, stem: &str) -> Result<std::path::PathBuf> {
+    for quant in &["int8", "int4", "fp16", "fp32"] {
+        let candidate = model_dir.join(format!("{}.{}.onnx", stem, quant));
+        if candidate.exists() {
+            info!("FunASR Nano: resolved {} → {}", stem, candidate.display());
+            return Ok(candidate);
+        }
+    }
+    Err(anyhow::anyhow!(
+        "FunASR Nano: cannot find {}.{{int8,int4,fp16,fp32}}.onnx in {}",
+        stem,
+        model_dir.display()
+    ))
+}
+
 fn load_funasr_nano(model_dir: &std::path::Path) -> Result<FunASRNanoEngine> {
     info!("FunASR Nano: loading from {}", model_dir.display());
 
-    // Log the actual directory contents to diagnose layout issues
+    // Log directory contents to diagnose layout issues
     match std::fs::read_dir(model_dir) {
         Ok(entries) => {
             for entry in entries.flatten() {
@@ -778,31 +795,17 @@ fn load_funasr_nano(model_dir: &std::path::Path) -> Result<FunASRNanoEngine> {
         }
     }
 
-    let encoder_adaptor = model_dir.join("encoder_adaptor.int8.onnx");
-    let llm = model_dir.join("llm.int8.onnx");
-    let embedding = model_dir.join("embedding.int8.onnx");
+    // Auto-detect quantization suffix (int8 / int4 / fp16 / fp32)
+    let encoder_adaptor = resolve_funasr_file(model_dir, "encoder_adaptor")?;
+    let llm = resolve_funasr_file(model_dir, "llm")?;
+    let embedding = resolve_funasr_file(model_dir, "embedding")?;
     let tokenizer = model_dir.join("Qwen3-0.6B");
 
-    for (label, path) in [
-        ("encoder_adaptor", &encoder_adaptor),
-        ("llm", &llm),
-        ("embedding", &embedding),
-        ("tokenizer dir", &tokenizer),
-    ] {
-        if !path.exists() {
-            error!(
-                "FunASR Nano: missing {} at {}",
-                label,
-                path.display()
-            );
-            anyhow::bail!(
-                "FunASR Nano: missing {} at {}",
-                label,
-                path.display()
-            );
-        }
-        info!("FunASR Nano: found {} OK", label);
+    if !tokenizer.exists() {
+        error!("FunASR Nano: missing tokenizer dir at {}", tokenizer.display());
+        anyhow::bail!("FunASR Nano: missing tokenizer dir at {}", tokenizer.display());
     }
+    info!("FunASR Nano: found tokenizer dir OK");
 
     let funasr_config = sherpa_onnx::OfflineFunASRNanoModelConfig {
         encoder_adaptor: Some(encoder_adaptor.to_string_lossy().into_owned()),

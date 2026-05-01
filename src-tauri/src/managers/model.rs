@@ -31,12 +31,23 @@ pub enum EngineType {
     FunASR,
 }
 
+/// A single file to download as part of a multi-file directory model.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ModelFile {
+    /// Relative path within the model directory (e.g. "encoder_adaptor.int4.onnx" or "Qwen3-0.6B/tokenizer.json")
+    pub relative_path: String,
+    /// Download URL for this file
+    pub url: String,
+    pub sha256: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct ModelInfo {
     pub id: String,
     pub name: String,
     pub description: String,
     pub filename: String,
+    /// Single-archive download URL (tar.gz or tar.bz2). Mutually exclusive with `files`.
     pub url: Option<String>,
     pub sha256: Option<String>,
     pub size_mb: u64,
@@ -45,13 +56,17 @@ pub struct ModelInfo {
     pub partial_size: u64,
     pub is_directory: bool,
     pub engine_type: EngineType,
-    pub accuracy_score: f32,        // 0.0 to 1.0, higher is more accurate
-    pub speed_score: f32,           // 0.0 to 1.0, higher is faster
-    pub supports_translation: bool, // Whether the model supports translating to English
-    pub is_recommended: bool,       // Whether this is the recommended model for new users
-    pub supported_languages: Vec<String>, // Languages this model can transcribe
-    pub supports_language_selection: bool, // Whether the user can explicitly pick a language
-    pub is_custom: bool,            // Whether this is a user-provided custom model
+    pub accuracy_score: f32,
+    pub speed_score: f32,
+    pub supports_translation: bool,
+    pub is_recommended: bool,
+    pub supported_languages: Vec<String>,
+    pub supports_language_selection: bool,
+    pub is_custom: bool,
+    /// Individual files to download into the model directory.
+    /// When non-empty, `url` is ignored and each file is fetched separately.
+    #[serde(default)]
+    pub files: Vec<ModelFile>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -149,6 +164,7 @@ impl ModelManager {
                 supported_languages: whisper_languages.clone(),
                 supports_language_selection: true,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -177,6 +193,7 @@ impl ModelManager {
                 supported_languages: whisper_languages.clone(),
                 supports_language_selection: true,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -204,6 +221,7 @@ impl ModelManager {
                 supported_languages: whisper_languages.clone(),
                 supports_language_selection: true,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -231,6 +249,7 @@ impl ModelManager {
                 supported_languages: whisper_languages.clone(),
                 supports_language_selection: true,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -259,6 +278,7 @@ impl ModelManager {
                 supported_languages: whisper_languages,
                 supports_language_selection: true,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -287,6 +307,7 @@ impl ModelManager {
                 supported_languages: vec!["en".to_string()],
                 supports_language_selection: false,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -324,6 +345,7 @@ impl ModelManager {
                 supported_languages: parakeet_v3_languages,
                 supports_language_selection: false,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -351,6 +373,7 @@ impl ModelManager {
                 supported_languages: vec!["en".to_string()],
                 supports_language_selection: false,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -380,6 +403,7 @@ impl ModelManager {
                 supported_languages: vec!["en".to_string()],
                 supports_language_selection: false,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -409,6 +433,7 @@ impl ModelManager {
                 supported_languages: vec!["en".to_string()],
                 supports_language_selection: false,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -438,6 +463,7 @@ impl ModelManager {
                 supported_languages: vec!["en".to_string()],
                 supports_language_selection: false,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -473,6 +499,7 @@ impl ModelManager {
                 supported_languages: sense_voice_languages,
                 supports_language_selection: true,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -503,6 +530,7 @@ impl ModelManager {
                 supported_languages: gigaam_languages,
                 supports_language_selection: false,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -537,6 +565,7 @@ impl ModelManager {
                 supported_languages: canary_flash_languages,
                 supports_language_selection: true,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -574,6 +603,7 @@ impl ModelManager {
                 supported_languages: canary_1b_languages,
                 supports_language_selection: true,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -609,6 +639,7 @@ impl ModelManager {
                 supported_languages: cohere_languages,
                 supports_language_selection: true,
                 is_custom: false,
+                files: vec![],
             },
         );
 
@@ -620,21 +651,19 @@ impl ModelManager {
         .map(String::from)
         .collect();
 
-        // Fun-ASR-Nano-2512: encoder_adaptor + llm + embedding + Qwen3-0.6B tokenizer
-        // Model archive from sherpa-onnx pre-built int8 release (948 MB).
+        // Fun-ASR-Nano-2512 int8: packed archive from ModelScope mirror (~948 MB)
         available_models.insert(
             "funasr-nano-int8".to_string(),
             ModelInfo {
                 id: "funasr-nano-int8".to_string(),
-                name: "Fun-ASR Nano".to_string(),
-                description: "Excellent Chinese, dialects, English, Japanese. 800M params."
-                    .to_string(),
+                name: "Fun-ASR Nano (int8)".to_string(),
+                description: "中文方言/口音、英文、日文。800M参数。".to_string(),
                 filename: "sherpa-onnx-funasr-nano-int8-2025-12-30".to_string(),
                 url: Some(
                     "https://modelscope.cn/models/csukuangfj/asr-models/resolve/master/sherpa-onnx-funasr-nano-int8-2025-12-30.tar.bz2"
                         .to_string(),
                 ),
-                sha256: None, // GitHub release artifacts don't have a fixed SHA256 in docs
+                sha256: None,
                 size_mb: 948,
                 is_downloaded: false,
                 is_downloading: false,
@@ -648,6 +677,66 @@ impl ModelManager {
                 supported_languages: funasr_nano_languages.clone(),
                 supports_language_selection: true,
                 is_custom: false,
+                files: vec![],
+            },
+        );
+
+        // Fun-ASR-Nano-2512 int4: individual files from HuggingFace (~1.09 GB, int4 quantized)
+        let hf_base = "https://huggingface.co/foryoung365/Fun-ASR-Nano-2512-int4-onnx/resolve/main";
+        available_models.insert(
+            "funasr-nano-int4".to_string(),
+            ModelInfo {
+                id: "funasr-nano-int4".to_string(),
+                name: "Fun-ASR Nano (int4)".to_string(),
+                description: "中文方言/口音、英文、日文。int4量化，内存占用更低。".to_string(),
+                filename: "funasr-nano-int4-onnx".to_string(),
+                url: None,
+                sha256: None,
+                size_mb: 1090,
+                is_downloaded: false,
+                is_downloading: false,
+                partial_size: 0,
+                is_directory: true,
+                engine_type: EngineType::FunASR,
+                accuracy_score: 0.85,
+                speed_score: 0.82,
+                supports_translation: false,
+                is_recommended: false,
+                supported_languages: funasr_nano_languages.clone(),
+                supports_language_selection: true,
+                is_custom: false,
+                files: vec![
+                    ModelFile {
+                        relative_path: "encoder_adaptor.int4.onnx".to_string(),
+                        url: format!("{}/encoder_adaptor.int4.onnx", hf_base),
+                        sha256: None,
+                    },
+                    ModelFile {
+                        relative_path: "llm.int4.onnx".to_string(),
+                        url: format!("{}/llm.int4.onnx", hf_base),
+                        sha256: None,
+                    },
+                    ModelFile {
+                        relative_path: "embedding.int4.onnx".to_string(),
+                        url: format!("{}/embedding.int4.onnx", hf_base),
+                        sha256: None,
+                    },
+                    ModelFile {
+                        relative_path: "Qwen3-0.6B/merges.txt".to_string(),
+                        url: format!("{}/Qwen3-0.6B/merges.txt", hf_base),
+                        sha256: None,
+                    },
+                    ModelFile {
+                        relative_path: "Qwen3-0.6B/tokenizer.json".to_string(),
+                        url: format!("{}/Qwen3-0.6B/tokenizer.json", hf_base),
+                        sha256: None,
+                    },
+                    ModelFile {
+                        relative_path: "Qwen3-0.6B/vocab.json".to_string(),
+                        url: format!("{}/Qwen3-0.6B/vocab.json", hf_base),
+                        sha256: None,
+                    },
+                ],
             },
         );
 
@@ -968,6 +1057,7 @@ impl ModelManager {
                     supported_languages: vec![],
                     supports_language_selection: true,
                     is_custom: true,
+                    files: vec![],
                 },
             );
         }
@@ -1033,6 +1123,11 @@ impl ModelManager {
 
         let model_info =
             model_info.ok_or_else(|| anyhow::anyhow!("Model not found: {}", model_id))?;
+
+        // Multi-file models: download each file individually into the model directory
+        if !model_info.files.is_empty() {
+            return self.download_model_files(model_id, &model_info).await;
+        }
 
         let url = model_info
             .url
@@ -1371,6 +1466,175 @@ impl ModelManager {
         Ok(())
     }
 
+    /// Download multiple individual files into a model directory.
+    /// Used for models hosted as loose files (e.g. HuggingFace repos without a pre-packaged archive).
+    async fn download_model_files(&self, model_id: &str, model_info: &ModelInfo) -> Result<()> {
+        let model_dir = self.models_dir.join(&model_info.filename);
+
+        // Already fully downloaded
+        if model_dir.exists() && model_dir.is_dir() {
+            self.update_download_status()?;
+            return Ok(());
+        }
+
+        // Mark as downloading
+        {
+            let mut models = self.available_models.lock().unwrap();
+            if let Some(m) = models.get_mut(model_id) {
+                m.is_downloading = true;
+            }
+        }
+
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        {
+            let mut flags = self.cancel_flags.lock().unwrap();
+            flags.insert(model_id.to_string(), cancel_flag.clone());
+        }
+
+        let mut cleanup = DownloadCleanup {
+            available_models: &self.available_models,
+            cancel_flags: &self.cancel_flags,
+            model_id: model_id.to_string(),
+            disarmed: false,
+        };
+
+        fs::create_dir_all(&model_dir)?;
+
+        let client = reqwest::Client::new();
+        let total_files = model_info.files.len();
+
+        for (file_idx, model_file) in model_info.files.iter().enumerate() {
+            if cancel_flag.load(Ordering::Relaxed) {
+                info!("Multi-file download cancelled for: {}", model_id);
+                return Ok(());
+            }
+
+            let dest_path = model_dir.join(&model_file.relative_path);
+
+            // Create parent directories for nested files (e.g. Qwen3-0.6B/)
+            if let Some(parent) = dest_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+
+            if dest_path.exists() {
+                info!(
+                    "File {}/{} already exists, skipping: {}",
+                    file_idx + 1,
+                    total_files,
+                    model_file.relative_path
+                );
+                continue;
+            }
+
+            let partial_path = model_dir.join(format!("{}.partial", model_file.relative_path));
+
+            let resume_from = if partial_path.exists() {
+                partial_path.metadata()?.len()
+            } else {
+                0
+            };
+
+            info!(
+                "Downloading file {}/{}: {} (resume_from={})",
+                file_idx + 1,
+                total_files,
+                model_file.relative_path,
+                resume_from
+            );
+
+            let mut request = client.get(&model_file.url);
+            if resume_from > 0 {
+                request = request.header("Range", format!("bytes={}-", resume_from));
+            }
+
+            let mut response = request.send().await?;
+
+            if resume_from > 0 && response.status() == reqwest::StatusCode::OK {
+                warn!("Server doesn't support range requests, restarting file download");
+                let _ = fs::remove_file(&partial_path);
+                response = client.get(&model_file.url).send().await?;
+            }
+
+            if !response.status().is_success()
+                && response.status() != reqwest::StatusCode::PARTIAL_CONTENT
+            {
+                return Err(anyhow::anyhow!(
+                    "Failed to download {}: HTTP {}",
+                    model_file.relative_path,
+                    response.status()
+                ));
+            }
+
+            let total_size = resume_from + response.content_length().unwrap_or(0);
+            let mut downloaded = resume_from;
+            let mut stream = response.bytes_stream();
+
+            let mut file = if resume_from > 0 {
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&partial_path)?
+            } else {
+                std::fs::File::create(&partial_path)?
+            };
+
+            let mut last_emit = Instant::now();
+            let throttle_duration = Duration::from_millis(200);
+
+            while let Some(chunk) = stream.next().await {
+                if cancel_flag.load(Ordering::Relaxed) {
+                    drop(file);
+                    info!("Multi-file download cancelled mid-file: {}", model_id);
+                    return Ok(());
+                }
+
+                let chunk = chunk?;
+                file.write_all(&chunk)?;
+                downloaded += chunk.len() as u64;
+
+                if last_emit.elapsed() >= throttle_duration {
+                    let percentage = if total_size > 0 {
+                        (downloaded as f64 / total_size as f64) * 100.0
+                    } else {
+                        0.0
+                    };
+                    let progress = DownloadProgress {
+                        model_id: model_id.to_string(),
+                        downloaded,
+                        total: total_size,
+                        percentage,
+                    };
+                    let _ = self.app_handle.emit("model-download-progress", &progress);
+                    last_emit = Instant::now();
+                }
+            }
+
+            file.flush()?;
+            drop(file);
+
+            // Move partial → final
+            fs::rename(&partial_path, &dest_path)?;
+            info!("Downloaded: {}", model_file.relative_path);
+        }
+
+        // All files downloaded
+        cleanup.disarmed = true;
+        {
+            let mut models = self.available_models.lock().unwrap();
+            if let Some(m) = models.get_mut(model_id) {
+                m.is_downloading = false;
+                m.is_downloaded = true;
+                m.partial_size = 0;
+            }
+        }
+        self.cancel_flags.lock().unwrap().remove(model_id);
+
+        let _ = self.app_handle.emit("model-download-complete", model_id);
+        info!("All files downloaded for model: {}", model_id);
+
+        Ok(())
+    }
+
     pub fn delete_model(&self, model_id: &str) -> Result<()> {
         debug!("ModelManager: delete_model called for: {}", model_id);
 
@@ -1567,6 +1831,7 @@ mod tests {
                 supported_languages: vec!["en".to_string()],
                 supports_language_selection: true,
                 is_custom: false,
+                files: vec![],
             },
         );
 

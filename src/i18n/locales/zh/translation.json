@@ -95,8 +95,12 @@
         "description": "大型模型，速度较慢，但多语言识别非常准确。"
       },
       "funasr-nano-int8": {
-        "name": "Fun-ASR Nano",
+        "name": "Fun-ASR Nano (int8)",
         "description": "中文（方言与口音）、英文、日文识别极佳。8亿参数，支持歌词识别。"
+      },
+      "funasr-nano-int4": {
+        "name": "Fun-ASR Nano (int4)",
+        "description": "中文方言/口音、英文、日文。int4量化版，内存占用更低，速度更快。"
       }
     },
     "errors": {
