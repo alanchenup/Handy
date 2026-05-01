@@ -681,8 +681,9 @@ impl ModelManager {
             },
         );
 
-        // Fun-ASR-Nano-2512 int4: individual files from HuggingFace (~1.09 GB, int4 quantized)
-        let hf_base = "https://huggingface.co/foryoung365/Fun-ASR-Nano-2512-int4-onnx/resolve/main";
+        // Fun-ASR-Nano-2512 int4: individual files from HuggingFace mirror (~1.09 GB, int4 quantized)
+        // hf-mirror.com is a China-accessible HuggingFace mirror
+        let hf_base = "https://hf-mirror.com/foryoung365/Fun-ASR-Nano-2512-int4-onnx/resolve/main";
         available_models.insert(
             "funasr-nano-int4".to_string(),
             ModelInfo {
