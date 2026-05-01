@@ -631,7 +631,7 @@ impl ModelManager {
                     .to_string(),
                 filename: "sherpa-onnx-funasr-nano-int8-2025-12-30".to_string(),
                 url: Some(
-                    "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-funasr-nano-int8-2025-12-30.tar.bz2"
+                    "https://modelscope.cn/models/csukuangfj/asr-models/resolve/master/sherpa-onnx-funasr-nano-int8-2025-12-30.tar.bz2"
                         .to_string(),
                 ),
                 sha256: None, // GitHub release artifacts don't have a fixed SHA256 in docs
