@@ -32,7 +32,6 @@ use transcribe_rs::{
 /// sherpa_onnx::OfflineRecognizer is Send + Sync; we declare the same for this wrapper.
 pub struct FunASRNanoEngine {
     recognizer: sherpa_onnx::OfflineRecognizer,
-    model_dir: std::path::PathBuf,
 }
 
 // SAFETY: OfflineRecognizer is backed by a C library that is thread-safe for
@@ -813,10 +812,7 @@ fn load_funasr_nano(model_dir: &std::path::Path) -> Result<FunASRNanoEngine> {
         model_dir.display()
     );
 
-    Ok(FunASRNanoEngine {
-        recognizer,
-        model_dir: model_dir.to_path_buf(),
-    })
+    Ok(FunASRNanoEngine { recognizer })
 }
 
 /// Run FunASR Nano inference on mono 16 kHz f32 PCM samples.
