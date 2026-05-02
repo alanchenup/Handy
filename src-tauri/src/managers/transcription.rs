@@ -28,6 +28,16 @@ use transcribe_rs::{
     SpeechModel, TranscribeOptions,
 };
 
+/// Wrapper around sherpa-onnx OfflineRecognizer for FunASR Nano.
+/// sherpa_onnx::OfflineRecognizer is Send + Sync; we declare the same for this wrapper.
+pub struct FunASRNanoEngine {
+    recognizer: sherpa_onnx::OfflineRecognizer,
+}
+
+// SAFETY: OfflineRecognizer is backed by a C library that is thread-safe for
+// decode operations (sherpa-onnx impl declares Send+Sync on the recognizer).
+unsafe impl Send for FunASRNanoEngine {}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct ModelStateEvent {
     pub event_type: String,
@@ -45,6 +55,7 @@ enum LoadedEngine {
     GigaAM(GigaAMModel),
     Canary(CanaryModel),
     Cohere(CohereModel),
+    FunASR(FunASRNanoEngine),
 }
 
 /// RAII guard that clears the `is_loading` flag and notifies waiters on drop.
@@ -377,6 +388,14 @@ impl TranscriptionManager {
                 })?;
                 LoadedEngine::Cohere(engine)
             }
+            EngineType::FunASR => {
+                let engine = load_funasr_nano(&model_path).map_err(|e| {
+                    let error_msg = format!("Failed to load FunASR Nano model {}: {}", model_id, e);
+                    emit_loading_failed(&error_msg);
+                    anyhow::anyhow!(error_msg)
+                })?;
+                LoadedEngine::FunASR(engine)
+            }
         };
 
         // Update the current engine and model ID
@@ -629,6 +648,9 @@ impl TranscriptionManager {
                                 .transcribe(&audio, &options)
                                 .map_err(|e| anyhow::anyhow!("Cohere transcription failed: {}", e))
                         }
+                        LoadedEngine::FunASR(funasr_engine) => {
+                            transcribe_funasr_nano(funasr_engine, &audio, &validated_language)
+                        }
                     }
                 },
             ));
@@ -689,6 +711,7 @@ impl TranscriptionManager {
             .get_model_info(&settings.selected_model)
             .map(|info| matches!(info.engine_type, EngineType::Whisper))
             .unwrap_or(false);
+        // FunASR does not use initial_prompt; custom words are applied post-transcription
 
         let corrected_result = if !settings.custom_words.is_empty() && !is_whisper {
             apply_custom_words(
@@ -731,6 +754,116 @@ impl TranscriptionManager {
 
         Ok(final_result)
     }
+}
+
+/// Load a FunASR Nano model directory into a sherpa-onnx OfflineRecognizer.
+///
+/// Expected directory layout (from sherpa-onnx pre-built int8 release):
+///   <model_dir>/encoder_adaptor.int8.onnx
+///   <model_dir>/llm.int8.onnx
+///   <model_dir>/embedding.int8.onnx
+///   <model_dir>/Qwen3-0.6B/   (tokenizer directory)
+/// Resolve a model file by trying multiple quantization suffixes.
+/// Returns the first existing path, or an error listing all candidates tried.
+fn resolve_funasr_file(model_dir: &std::path::Path, stem: &str) -> Result<std::path::PathBuf> {
+    for quant in &["int8", "int4", "fp16", "fp32"] {
+        let candidate = model_dir.join(format!("{}.{}.onnx", stem, quant));
+        if candidate.exists() {
+            info!("FunASR Nano: resolved {} → {}", stem, candidate.display());
+            return Ok(candidate);
+        }
+    }
+    Err(anyhow::anyhow!(
+        "FunASR Nano: cannot find {}.{{int8,int4,fp16,fp32}}.onnx in {}",
+        stem,
+        model_dir.display()
+    ))
+}
+
+fn load_funasr_nano(model_dir: &std::path::Path) -> Result<FunASRNanoEngine> {
+    info!("FunASR Nano: loading from {}", model_dir.display());
+
+    // Log directory contents to diagnose layout issues
+    match std::fs::read_dir(model_dir) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                info!("FunASR Nano dir entry: {:?}", entry.file_name());
+            }
+        }
+        Err(e) => {
+            error!("FunASR Nano: cannot read model_dir {}: {}", model_dir.display(), e);
+        }
+    }
+
+    // Auto-detect quantization suffix (int8 / int4 / fp16 / fp32)
+    let encoder_adaptor = resolve_funasr_file(model_dir, "encoder_adaptor")?;
+    let llm = resolve_funasr_file(model_dir, "llm")?;
+    let embedding = resolve_funasr_file(model_dir, "embedding")?;
+    let tokenizer = model_dir.join("Qwen3-0.6B");
+
+    if !tokenizer.exists() {
+        error!("FunASR Nano: missing tokenizer dir at {}", tokenizer.display());
+        anyhow::bail!("FunASR Nano: missing tokenizer dir at {}", tokenizer.display());
+    }
+    info!("FunASR Nano: found tokenizer dir OK");
+
+    let funasr_config = sherpa_onnx::OfflineFunASRNanoModelConfig {
+        encoder_adaptor: Some(encoder_adaptor.to_string_lossy().into_owned()),
+        llm: Some(llm.to_string_lossy().into_owned()),
+        embedding: Some(embedding.to_string_lossy().into_owned()),
+        tokenizer: Some(tokenizer.to_string_lossy().into_owned()),
+        system_prompt: Some("You are a helpful assistant.".to_string()),
+        user_prompt: Some("语音转写：".to_string()),
+        max_new_tokens: 512,
+        temperature: 1e-6,
+        top_p: 0.8,
+        seed: 42,
+        language: None,
+        itn: 1,
+        hotwords: None,
+    };
+
+    info!("FunASR Nano: creating OfflineRecognizer...");
+    let mut config = sherpa_onnx::OfflineRecognizerConfig::default();
+    config.model_config.funasr_nano = funasr_config;
+    config.model_config.model_type = Some("funasr_nano".to_string());
+
+    let recognizer = sherpa_onnx::OfflineRecognizer::create(&config)
+        .ok_or_else(|| anyhow::anyhow!("Failed to create FunASR Nano recognizer — check that all model files are present and valid"))?;
+
+    info!("FunASR Nano: recognizer loaded OK from {}", model_dir.display());
+
+    Ok(FunASRNanoEngine { recognizer })
+}
+
+/// Run FunASR Nano inference on mono 16 kHz f32 PCM samples.
+fn transcribe_funasr_nano(
+    engine: &mut FunASRNanoEngine,
+    audio: &[f32],
+    language: &str,
+) -> Result<transcribe_rs::TranscriptionResult> {
+    // FunASR Nano auto-detects Chinese/English/Japanese from audio content.
+    // Per-request language control would require rebuilding the recognizer,
+    // so we rely on auto-detection via the baked-in user_prompt "语音转写：".
+    let _ = language;
+
+    info!("FunASR Nano: transcribing {} samples ({:.1}s)", audio.len(), audio.len() as f32 / 16000.0);
+
+    let stream = engine.recognizer.create_stream();
+    stream.accept_waveform(16000, audio);
+    engine.recognizer.decode(&stream);
+
+    let result = stream
+        .get_result()
+        .ok_or_else(|| anyhow::anyhow!("FunASR Nano: no result from stream"))?;
+
+    let text = result.text.trim().to_string();
+    info!("FunASR Nano: result chars={} text={:?}", text.chars().count(), &text.chars().take(80).collect::<String>());
+
+    Ok(transcribe_rs::TranscriptionResult {
+        text,
+        segments: None,
+    })
 }
 
 /// Apply the user's accelerator preferences to the transcribe-rs global atomics.
